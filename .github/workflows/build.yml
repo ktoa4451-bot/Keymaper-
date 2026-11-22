@@ -1,0 +1,53 @@
+name: Build APK from ZIP
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # Если в репозитории лежит ZIP с проектом — распаковываем его и ищем корень проекта.
+      # Если проект залит обычными файлами — собираем прямо из корня.
+      - name: Unpack ZIP and find project
+        run: |
+          set -e
+          shopt -s nullglob
+          mkdir -p _work
+          zips=( *.zip *.ZIP )
+          if [ ${#zips[@]} -gt 0 ]; then
+            for z in "${zips[@]}"; do
+              echo "Unpacking $z"
+              unzip -q -o "$z" -d _work
+            done
+            S=$(find _work -name 'settings.gradle*' | head -n1)
+          else
+            S=$(find . -maxdepth 3 -name 'settings.gradle*' -not -path './_work/*' | head -n1)
+          fi
+          if [ -z "$S" ]; then echo "settings.gradle not found"; exit 1; fi
+          ROOT=$(dirname "$S")
+          echo "Project dir: $ROOT"
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --no-daemon --stacktrace
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp app/build/outputs/apk/debug/*.apk "$GITHUB_WORKSPACE/out/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KeyMapper-apk
+          path: out/*.apk
